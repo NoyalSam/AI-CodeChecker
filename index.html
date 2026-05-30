@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CodeScan — AI Code Reviewer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,400;0,500;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --surface2: #18181f;
+    --border: rgba(255,255,255,0.08);
+    --border-bright: rgba(255,255,255,0.15);
+    --text: #e8e8f0;
+    --text-muted: #6b6b80;
+    --text-dim: #3a3a4a;
+    --accent: #7c6dfa;
+    --accent-glow: rgba(124,109,250,0.25);
+    --critical: #ff4d6d;
+    --high: #ff9f43;
+    --medium: #4dabf7;
+    --low: #69db7c;
+    --success: #51cf66;
+    --mono: 'DM Mono', monospace;
+    --display: 'Syne', sans-serif;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--display);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grid bg ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(var(--border) 1px, transparent 1px),
+      linear-gradient(90deg, var(--border) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* ── Header ── */
+  header {
+    position: relative;
+    z-index: 1;
+    padding: 1.5rem 2rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    backdrop-filter: blur(8px);
+    background: rgba(10,10,15,0.8);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .logo-icon {
+    width: 32px; height: 32px;
+    background: var(--accent);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  .logo-icon svg { width: 18px; height: 18px; fill: white; }
+
+  .logo-text {
+    font-size: 1.1rem;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: #fff;
+  }
+
+  .logo-text span { color: var(--accent); }
+
+  .tagline {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* ── Main layout ── */
+  main {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    height: calc(100vh - 65px);
+  }
+
+  /* ── Panels ── */
+  .panel {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border);
+    overflow: hidden;
+  }
+
+  .panel-header {
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-shrink: 0;
+  }
+
+  .panel-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+  }
+
+  .panel-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .panel-body::-webkit-scrollbar { width: 4px; }
+  .panel-body::-webkit-scrollbar-track { background: transparent; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 2px; }
+
+  /* ── Code editor ── */
+  #code-input {
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    border: none;
+    outline: none;
+    resize: none;
+    font-family: var(--mono);
+    font-size: 13px;
+    line-height: 1.7;
+    color: var(--text);
+    caret-color: var(--accent);
+    tab-size: 4;
+  }
+
+  #code-input::placeholder {
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  /* ── Scan button ── */
+  .scan-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    padding: 0.5rem 1.25rem;
+    border-radius: 6px;
+    font-family: var(--display);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s;
+    box-shadow: 0 0 0 0 var(--accent-glow);
+  }
+
+  .scan-btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 20px var(--accent-glow);
+  }
+
+  .scan-btn:active { transform: translateY(0); }
+
+  .scan-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  .scan-btn svg { width: 14px; height: 14px; }
+
+  /* ── Results right panel (split into top + bottom) ── */
+  .right-panel {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    overflow: hidden;
+  }
+
+  .sub-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .sub-panel:last-child { border-bottom: none; }
+
+  /* ── Empty state ── */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 10px;
+    color: var(--text-dim);
+  }
+
+  .empty-state svg { width: 32px; height: 32px; opacity: 0.3; }
+
+  .empty-state p {
+    font-family: var(--mono);
+    font-size: 12px;
+    text-align: center;
+    line-height: 1.6;
+  }
+
+  /* ── Summary bar ── */
+  .summary-bar {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 0 0 1rem;
+  }
+
+  .sev-badge {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    padding: 3px 10px;
+    border-radius: 20px;
+    border: 1px solid;
+  }
+
+  .sev-badge.critical { color: var(--critical); border-color: rgba(255,77,109,0.3); background: rgba(255,77,109,0.08); }
+  .sev-badge.high { color: var(--high); border-color: rgba(255,159,67,0.3); background: rgba(255,159,67,0.08); }
+  .sev-badge.medium { color: var(--medium); border-color: rgba(77,171,247,0.3); background: rgba(77,171,247,0.08); }
+  .sev-badge.low { color: var(--low); border-color: rgba(105,219,124,0.3); background: rgba(105,219,124,0.08); }
+  .sev-badge.clean { color: var(--success); border-color: rgba(81,207,102,0.3); background: rgba(81,207,102,0.08); }
+
+  /* ── Error cards ── */
+  .error-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1rem;
+    margin-bottom: 10px;
+    border-left: 3px solid;
+    animation: slideIn 0.3s ease both;
+  }
+
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .error-card.Critical { border-left-color: var(--critical); }
+  .error-card.High { border-left-color: var(--high); }
+  .error-card.Medium { border-left-color: var(--medium); }
+  .error-card.Low { border-left-color: var(--low); }
+
+  .error-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    flex-wrap: wrap;
+  }
+
+  .error-sev {
+    font-family: var(--mono);
+    font-size: 10px;
+    font-weight: 500;
+    padding: 2px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .error-sev.Critical { background: rgba(255,77,109,0.15); color: var(--critical); }
+  .error-sev.High { background: rgba(255,159,67,0.15); color: var(--high); }
+  .error-sev.Medium { background: rgba(77,171,247,0.15); color: var(--medium); }
+  .error-sev.Low { background: rgba(105,219,124,0.15); color: var(--low); }
+
+  .error-type {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-muted);
+  }
+
+  .error-line {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-left: auto;
+  }
+
+  .error-desc {
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.5;
+    margin-bottom: 8px;
+  }
+
+  .error-snippet {
+    font-family: var(--mono);
+    font-size: 12px;
+    background: rgba(0,0,0,0.4);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 10px;
+    color: var(--critical);
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  /* ── Corrected code panel ── */
+  .code-output {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.75;
+    color: #a8d8a8;
+    background: transparent;
+    white-space: pre;
+    overflow-x: auto;
+  }
+
+  /* ── Copy btn ── */
+  .copy-btn {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--text-muted);
+    padding: 4px 12px;
+    border-radius: 5px;
+    font-family: var(--mono);
+    font-size: 10px;
+    cursor: pointer;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    transition: all 0.2s;
+  }
+
+  .copy-btn:hover { background: var(--surface2); color: var(--text); }
+
+  /* ── Loading ── */
+  .loading-state {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 1rem 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-muted);
+  }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Language badge ── */
+  .lang-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    padding: 3px 9px;
+    border-radius: 4px;
+    background: var(--surface2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  /* ── Clean result ── */
+  .clean-result {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 12px;
+    color: var(--success);
+    text-align: center;
+  }
+
+  .clean-result svg { width: 40px; height: 40px; }
+  .clean-result h3 { font-size: 1rem; font-weight: 700; }
+  .clean-result p { font-family: var(--mono); font-size: 12px; color: var(--text-muted); }
+
+  /* ── Scrollbar for panels ── */
+  .panel-body::-webkit-scrollbar { width: 3px; }
+  .panel-body::-webkit-scrollbar-thumb { background: var(--border-bright); }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    main { grid-template-columns: 1fr; grid-template-rows: 50vh 1fr; height: auto; }
+    .panel { border-right: none; border-bottom: 1px solid var(--border); }
+    .right-panel { grid-template-rows: auto auto; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+    </div>
+    <div class="logo-text">Code<span>Scan</span></div>
+  </div>
+  <div class="tagline">Gemini-powered · Two-stage analysis</div>
+</header>
+
+<main>
+  <!-- Left: Code Input -->
+  <div class="panel">
+    <div class="panel-header">
+      <span class="panel-title">Input Code</span>
+      <button class="scan-btn" id="scanBtn" onclick="analyze()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/>
+          <polyline points="13 2 13 9 20 9"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+          <line x1="9" y1="11" x2="11" y2="11"/>
+        </svg>
+        Scan
+      </button>
+    </div>
+    <div class="panel-body" style="padding: 0;">
+      <textarea
+        id="code-input"
+        placeholder="# Paste your code here...
+# Supports Python, JavaScript, Java, C++, and more
+
+a = 10
+b = 20
+prin(a + b)"
+        spellcheck="false"
+        style="padding: 1.25rem 1.5rem;"
+      ></textarea>
+    </div>
+  </div>
+
+  <!-- Right: Results -->
+  <div class="right-panel">
+
+    <!-- Top: Error Analysis -->
+    <div class="sub-panel">
+      <div class="panel-header">
+        <span class="panel-title">Error Analysis</span>
+        <div id="langBadge" style="display:none" class="lang-badge"></div>
+      </div>
+      <div class="panel-body" id="errorPanel">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <p>Paste your code and hit Scan<br>to detect errors instantly</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom: Corrected Code -->
+    <div class="sub-panel">
+      <div class="panel-header">
+        <span class="panel-title">Corrected Code</span>
+        <button class="copy-btn" id="copyBtn" onclick="copyCode()" style="display:none">Copy</button>
+      </div>
+      <div class="panel-body" id="fixPanel">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+          </svg>
+          <p>Corrected code will appear here<br>after errors are found</p>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+let correctedCode = '';
+
+async function analyze() {
+  const code = document.getElementById('code-input').value.trim();
+  if (!code) return;
+
+  const btn = document.getElementById('scanBtn');
+  const errorPanel = document.getElementById('errorPanel');
+  const fixPanel = document.getElementById('fixPanel');
+  const langBadge = document.getElementById('langBadge');
+  const copyBtn = document.getElementById('copyBtn');
+
+  // Loading state
+  btn.disabled = true;
+  btn.innerHTML = `<div class="spinner"></div> Scanning`;
+  langBadge.style.display = 'none';
+  copyBtn.style.display = 'none';
+  correctedCode = '';
+
+  errorPanel.innerHTML = `<div class="loading-state"><div class="spinner"></div>LLM 1 detecting errors...</div>`;
+  fixPanel.innerHTML = `<div class="loading-state"><div class="spinner" style="border-top-color:#51cf66"></div>Waiting for analysis...</div>`;
+
+  try {
+    const res = await fetch('/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      errorPanel.innerHTML = `<div class="error-card Critical" style="border-left-color:#ff4d6d">
+        <div class="error-desc" style="color:#ff4d6d">⚠ ${data.error || 'Unknown error'}</div>
+      </div>`;
+      fixPanel.innerHTML = `<div class="empty-state"><p>Analysis failed</p></div>`;
+      return;
+    }
+
+    const { analysis, corrected_code } = data;
+
+    // Show language badge
+    if (analysis.language) {
+      langBadge.textContent = analysis.language;
+      langBadge.style.display = 'inline-block';
+    }
+
+    // Render errors
+    renderErrors(errorPanel, analysis);
+
+    // Render corrected code
+    if (corrected_code) {
+      correctedCode = corrected_code;
+      fixPanel.innerHTML = `<pre class="code-output">${escHtml(corrected_code)}</pre>`;
+      copyBtn.style.display = 'inline-block';
+    } else if (!analysis.has_errors) {
+      fixPanel.innerHTML = `<div class="clean-result">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+          <polyline points="22 4 12 14.01 9 11.01"/>
+        </svg>
+        <h3>No fixes needed</h3>
+        <p>Your code is already correct</p>
+      </div>`;
+    } else {
+      fixPanel.innerHTML = `<div class="empty-state"><p>No corrected code returned</p></div>`;
+    }
+
+  } catch (err) {
+    errorPanel.innerHTML = `<div class="error-card Critical"><div class="error-desc" style="color:#ff4d6d">Network error: ${err.message}</div></div>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="14" height="14"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg> Scan`;
+  }
+}
+
+function renderErrors(panel, analysis) {
+  if (!analysis.has_errors || analysis.errors.length === 0) {
+    panel.innerHTML = `<div class="clean-result">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+        <polyline points="22 4 12 14.01 9 11.01"/>
+      </svg>
+      <h3>Code looks clean!</h3>
+      <p>${analysis.summary || 'No errors detected'}</p>
+    </div>`;
+    return;
+  }
+
+  // Count by severity
+  const counts = { Critical: 0, High: 0, Medium: 0, Low: 0 };
+  analysis.errors.forEach(e => { if (counts[e.severity] !== undefined) counts[e.severity]++; });
+
+  let html = `<div class="summary-bar">`;
+  if (counts.Critical) html += `<span class="sev-badge critical">${counts.Critical} Critical</span>`;
+  if (counts.High)     html += `<span class="sev-badge high">${counts.High} High</span>`;
+  if (counts.Medium)   html += `<span class="sev-badge medium">${counts.Medium} Medium</span>`;
+  if (counts.Low)      html += `<span class="sev-badge low">${counts.Low} Low</span>`;
+  html += `</div>`;
+
+  if (analysis.summary) {
+    html += `<p style="font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-bottom:12px;line-height:1.6;">${escHtml(analysis.summary)}</p>`;
+  }
+
+  analysis.errors.forEach((err, i) => {
+    html += `<div class="error-card ${err.severity}" style="animation-delay:${i * 0.06}s">
+      <div class="error-meta">
+        <span class="error-sev ${err.severity}">${err.severity}</span>
+        <span class="error-type">${escHtml(err.type)}</span>
+        ${err.line ? `<span class="error-line">line ${err.line}</span>` : ''}
+      </div>
+      <div class="error-desc">${escHtml(err.description)}</div>
+      ${err.wrong_code ? `<div class="error-snippet">${escHtml(err.wrong_code)}</div>` : ''}
+    </div>`;
+  });
+
+  panel.innerHTML = html;
+}
+
+function escHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function copyCode() {
+  if (!correctedCode) return;
+  navigator.clipboard.writeText(correctedCode).then(() => {
+    const btn = document.getElementById('copyBtn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+
+// Ctrl+Enter to scan
+document.addEventListener('keydown', e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') analyze();
+});
+</script>
+</body>
+</html>
